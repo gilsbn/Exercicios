@@ -224,7 +224,7 @@ decomp <-
   as_tibble() %>%
   ungroup() 
 
-completa <- decomp %>% transmute(y = season_adjust) %>% ts(start = c(1996,1), frequency = 4)
+completa <- decomp   %>% transmute(y = season_adjust) %>% ts(start = c(1996,1), frequency = 4)
 amostra  <- completa %>% window(end = c(2019,4))
 training <- completa %>% window(end = c(2017,4))
 testsamp <- completa %>% window(start = c(2018,1), end = c(2019,4))
@@ -309,9 +309,9 @@ modelos(MOD = 5)
 # Modelos simples de previsão: pandemia -----------------------------------
 
 decomp <- 
-  cnt_vol %>% 
-  as_tsibble(index = t, key = c(Gp1, Gp2)) %>%
-  filter(Gp1 == "PIB") %>%
+  volume %>% 
+  as_tsibble(index = t, key = c(`Acrônimo`, Grupo)) %>%
+  filter(Grupo == "PIB") %>%
   model(X13 = X_13ARIMA_SEATS(y ~ seats())) %>%
   components() %>%
   as_tibble() %>%
@@ -403,8 +403,82 @@ modelos(MOD = 4)
 modelos(MOD = 5)
 
 
-#==========================================================================================================================
+# Modelos simples de previsão: utilizando fable -------------------------------
 
+decomp <- 
+  volume %>% 
+  as_tsibble(index = t, key = c(Grupo, `Acrônimo`)) %>%
+  filter(Grupo == "PIB") %>%
+  model(X13 = X_13ARIMA_SEATS(y ~ seats())) %>%
+  components() %>%
+  as_tsibble() %>%
+  ungroup()
+
+completa <- 
+  decomp %>%
+  transmute(t, 
+            y = season_adjust, 
+            d1 = if_else(year(t) == 2020 & quarter(t) == 1, 1, 0), 
+            d2 = if_else(year(t) == 2020 & quarter(t) == 2, 1, 0))
+
+training <- decomp %>% filter(year(t) <= 2019)
+
+modelos <- 
+  training %>% 
+  transmute(t, y = season_adjust) %>%
+  mutate(d1 = if_else(year(t) == 2020 & quarter(t) == 1, 1, 0), 
+         d2 = if_else(year(t) == 2020 & quarter(t) == 2, 1, 0)) %>%
+  model(`ARIMA(1,1,0)` = ARIMA(log(y) ~ 1 + pdq(1,1,0) + PDQ(0,0,0)), 
+        `ARIMA(2,1,0)` = ARIMA(log(y) ~ 1 + pdq(2,1,0) + PDQ(0,0,0)), 
+        `ARIMA(0,1,1)` = ARIMA(log(y) ~ 1 + pdq(0,1,1) + PDQ(0,0,0)), 
+        `ARIMA(0,1,2)` = ARIMA(log(y) ~ 1 + pdq(0,1,2) + PDQ(0,0,0)), 
+        `ARIMA(1,1,1)` = ARIMA(log(y) ~ 1 + pdq(1,1,1) + PDQ(0,0,0)), 
+        `ARIMA(2,1,1)` = ARIMA(log(y) ~ 1 + pdq(2,1,1) + PDQ(0,0,0)), 
+        `ARIMA(2,1,2)` = ARIMA(log(y) ~ 1 + pdq(2,1,2) + PDQ(0,0,0)))
+
+modelos %>% glance()
+
+modelos_fct <- modelos %>% forecast(h = 8)
+
+levels <- modelos_fct %>% tibble() %>% pull(.model) %>% unique()
+xmin   <- min(c(completa$t, unique(pull(as_tibble(modelos_fct),t))))
+xmax   <- max(c(completa$t, unique(pull(as_tibble(modelos_fct),t))))
+ymin   <- min(c(completa$y, unique(pull(as_tibble(modelos_fct),.mean))))
+ymax   <- max(c(completa$y, unique(pull(as_tibble(modelos_fct),.mean))))
+
+completa %>%
+  autoplot(y, size = 0.7) + 
+  autolayer(modelos_fct %>% mutate(.model = factor(.model, levels = levels)), level = seq(30,90,10), alpha = 0.15) + 
+  geom_vline(xintercept = as_date("2019-12-31"), linetype = 3) +
+  scale_x_yearquarter(NULL, breaks = seq(xmin, xmax, length.out = 10), expand = c(0,0), date_labels = "%Y:%q") + 
+  scale_y_continuous(NULL) + 
+  labs(title    = "MODELOS ARIMA: PREVISÃO DO PIB PARA 2019-2020", 
+       subtitle = "Índice de volume com ajuste sazonal (média 1995 = 100)", 
+       caption  = "Fonte: Estimativas do autor, dados do IBGE") + 
+  guides(fill   = guide_legend(title = "Modelos"), 
+         color  = guide_legend(title = "Modelos", override.aes = list(size = 1.2)), 
+         level  = guide_legend(title = "Intervalos", override.aes = list(fill = pal_c[1:7]))) +
+  g1 + leg01 + 
+  theme(plot.margin = margin(r = 16, unit = "pt"))
+  coord_cartesian(xlim = c(yearquarter(as.yearqtr(ymd(20171231))), xmax)) + 
+
+  
+  
+  guides(color = guide_legend(override.aes = list(size = 1),
+                              title = list("Modelos")), 
+         fill  = guide_legend(title = list("Modelos", "IC"), nrow = 2)) + 
+
+# ?aes    
+#     
+# ?guide_legend  
+# yearquarter(as.yearqtr(ymd(20181231)))
+# 
+# guides(color = guide_legend(override.aes = list(size = 1), 
+#                             title = list("Modelos"), alpha = 1), 
+#        fill  = guide_legend(title = list("Modelos"))) + 
+
+
+#==========================================================================================================================
 
 
 
